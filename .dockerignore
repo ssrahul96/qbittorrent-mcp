@@ -1,0 +1,38 @@
+# Git files
+.git/
+.gitignore
+.github/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation
+README.md
+*.md
+
+# Test files
+*.log
+qbittorrent_debug.log
+
+# Development files
+client.py
+
+# Docker files
+Dockerfile
+.dockerignore
+
