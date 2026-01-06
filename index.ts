@@ -39,7 +39,9 @@ const DEFAULT_PORT = 8000;
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Session-Id, Authorization",
+  "Access-Control-Allow-Credentials": "true",
+  "Access-Control-Expose-Headers": "Content-Type, Mcp-Session-Id",
 } as const;
 
 
