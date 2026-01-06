@@ -5,10 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx index.ts",
-    "client": "tsx client.ts"
+    "start": "node index.ts",
+    "dev": "nodemon src/index.ts"
   },
   "keywords": [
     "mcp",
@@ -20,13 +18,14 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "axios": "^1.7.7",
-    "form-data": "^4.0.1",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "form-data": "^4.0.1"
   },
   "devDependencies": {
-    "@types/node": "^22.7.5",
+    "@types/node": "^22.19.3",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.3"
+    "typescript": "^5.9.3"
   }
 }
-

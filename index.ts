@@ -531,7 +531,7 @@ async function main(): Promise<void> {
   setupGracefulShutdown(httpServer, transport);
 
   // Start listening
-  httpServer.listen(port, () => {
+  httpServer.listen(port, "0.0.0.0", () => {
     console.error(`qBittorrent MCP server running on HTTP port ${port}`);
   });
 }
