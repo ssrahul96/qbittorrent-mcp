@@ -21,7 +21,7 @@ import {
   addTrackersToTorrentApi,
   addTorrentTagsApi,
   getTorrentListApi,
-} from "./api.js";
+} from "./api.ts";
 
 // Types
 interface ApiCredentials {
