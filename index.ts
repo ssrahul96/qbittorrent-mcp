@@ -1,8 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import http from "http";
-import { randomUUID } from "crypto";
-import * as z from "zod";
+import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { Request, Response } from 'express';
+import * as z from 'zod';
 import {
   addTorrentApi,
   deleteTorrentApi,
@@ -36,23 +36,19 @@ const DEFAULT_CREDENTIALS: ApiCredentials = {
 };
 
 const DEFAULT_PORT = 8000;
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Session-Id, Authorization",
-  "Access-Control-Allow-Credentials": "true",
-  "Access-Control-Expose-Headers": "Content-Type, Mcp-Session-Id",
-} as const;
 
+const getServer = () => {
+  // Create an MCP server with implementation details
+  const server = new McpServer(
+    {
+      name: 'qbittorrent',
+      version: '0.1.0'
+    },
+    { capabilities: { logging: {} } }
+  );
 
-// Initialize MCP server
-const mcpServer = new McpServer({
-  name: "qbittorrent",
-  version: "0.1.0",
-});
-
-// Register tools using registerTool with Zod schemas
-mcpServer.registerTool(
+  // Register tools using registerTool with Zod schemas
+  server.registerTool(
   "add_torrent",
   {
     description:
@@ -81,7 +77,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "delete_torrent",
   {
     description:
@@ -112,7 +108,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "pause_torrent",
   {
     description:
@@ -141,7 +137,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "resume_torrent",
   {
     description:
@@ -170,7 +166,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "get_torrent_trackers",
   {
     description:
@@ -197,7 +193,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "set_global_download_limit",
   {
     description:
@@ -224,7 +220,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "set_global_upload_limit",
   {
     description:
@@ -251,7 +247,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "get_application_version",
   {
     description: "Get qBittorrent version\n\nReturns:\n  qBittorrent version",
@@ -274,7 +270,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "set_file_priority",
   {
     description:
@@ -307,7 +303,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "set_torrent_download_limit",
   {
     description:
@@ -336,7 +332,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "set_torrent_upload_limit",
   {
     description:
@@ -365,7 +361,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "add_trackers_to_torrent",
   {
     description:
@@ -399,7 +395,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "add_torrent_tags",
   {
     description:
@@ -432,7 +428,7 @@ mcpServer.registerTool(
   }
 );
 
-mcpServer.registerTool(
+  server.registerTool(
   "get_torrent_list",
   {
     description: "Get torrent list",
@@ -455,123 +451,80 @@ mcpServer.registerTool(
   }
 );
 
-// HTTP request handler
-async function handleHttpRequest(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  transport: StreamableHTTPServerTransport
-): Promise<void> {
-  // Handle both root / and /mcp paths (strip query parameters for matching)
-  const url = req.url || "/";
-  const urlPath = url.split("?")[0] || "/";
-  if (urlPath !== "/" && urlPath !== "/mcp" && !urlPath.startsWith("/mcp/")) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Not Found" }));
-    return;
-  }
+  return server;
+};
 
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    res.writeHead(200, CORS_HEADERS);
-    res.end();
-    return;
-  }
+const app = createMcpExpressApp();
 
-  // Set CORS headers for all responses
-  Object.entries(CORS_HEADERS).forEach(([key, value]) => {
-    res.setHeader(key, value);
-  });
-
-  // Handle GET requests (for SSE)
-  if (req.method === "GET") {
-    try {
-      await transport.handleRequest(req, res);
-    } catch (error) {
-      console.error("Transport error on GET:", error);
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal server error" }));
-      }
-    }
-    return;
-  }
-
-  // Handle POST requests
-  if (req.method === "POST") {
-    try {
-      await transport.handleRequest(req, res);
-    } catch (error) {
-      console.error("Transport error on POST:", error);
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal server error" }));
-      }
-    }
-    return;
-  }
-
-  // Method not allowed
-  res.writeHead(405, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "Method not allowed" }));
-}
-
-// Graceful shutdown handler
-function setupGracefulShutdown(
-  httpServer: http.Server,
-  transport: StreamableHTTPServerTransport
-): void {
-  const shutdown = async (signal: string) => {
-    console.error(`${signal} received, shutting down gracefully`);
-    httpServer.close(() => {
-      transport.close().then(() => {
-        process.exit(0);
-      });
+app.post('/mcp', async (req: Request, res: Response) => {
+  const server = getServer();
+  try {
+    const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined
     });
-  };
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    res.on('close', () => {
+      console.log('Request closed');
+      transport.close();
+      server.close();
+    });
+  } catch (error) {
+    console.error('Error handling MCP request:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal server error'
+        },
+        id: null
+      });
+    }
+  }
+});
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
-}
+app.get('/mcp', async (_req: Request, res: Response) => {
+  console.log('Received GET MCP request');
+  res.writeHead(405).end(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+        message: 'Method not allowed.'
+      },
+      id: null
+    })
+  );
+});
+
+app.delete('/mcp', async (_req: Request, res: Response) => {
+  console.log('Received DELETE MCP request');
+  res.writeHead(405).end(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+        message: 'Method not allowed.'
+      },
+      id: null
+    })
+  );
+});
 
 // Start the server
-async function main(): Promise<void> {
-  const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : DEFAULT_PORT;
+const PORT = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : DEFAULT_PORT;
+app.listen(PORT, error => {
+  if (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+  console.log(`qBittorrent MCP Server listening on port ${PORT}`);
+});
 
-  // Create Streamable HTTP transport
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: randomUUID,
-  });
-
-  // Connect server to transport
-  await mcpServer.connect(transport);
-
-  // Create HTTP server
-  const httpServer = http.createServer((req, res) => {
-    handleHttpRequest(req, res, transport).catch((error) => {
-      console.error("Request handling error:", error);
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal server error" }));
-      }
-    });
-  });
-
-  // Handle server errors
-  httpServer.on("error", (error: Error) => {
-    console.error("HTTP server error:", error);
-  });
-
-  // Setup graceful shutdown
-  setupGracefulShutdown(httpServer, transport);
-
-  // Start listening
-  httpServer.listen(port, "0.0.0.0", () => {
-    console.error(`qBittorrent MCP server running on HTTP port ${port}`);
-  });
-}
-
-main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
+// Handle server shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down server...');
+  process.exit(0);
 });
 
