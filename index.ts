@@ -454,7 +454,7 @@ const getServer = () => {
   return server;
 };
 
-const app = createMcpExpressApp();
+const app = createMcpExpressApp({ host: '0.0.0.0' });
 
 app.post('/mcp', async (req: Request, res: Response) => {
   const server = getServer();
