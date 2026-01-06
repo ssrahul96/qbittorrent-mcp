@@ -438,6 +438,14 @@ async function handleHttpRequest(
   res: http.ServerResponse,
   transport: StreamableHTTPServerTransport
 ): Promise<void> {
+  // Handle both root / and /mcp paths
+  const url = req.url || "/";
+  if (url !== "/" && url !== "/mcp" && !url.startsWith("/mcp/")) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Not Found" }));
+    return;
+  }
+
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     res.writeHead(200, CORS_HEADERS);
@@ -458,21 +466,7 @@ async function handleHttpRequest(
 
   // Handle POST requests
   if (req.method === "POST") {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => {
-      chunks.push(chunk);
-    });
-    req.on("end", async () => {
-      try {
-        const body = chunks.length > 0 ? Buffer.concat(chunks).toString() : "";
-        const parsedBody = body ? JSON.parse(body) : undefined;
-        await transport.handleRequest(req, res, parsedBody);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: `Invalid JSON: ${message}` }));
-      }
-    });
+    await transport.handleRequest(req, res);
     return;
   }
 
