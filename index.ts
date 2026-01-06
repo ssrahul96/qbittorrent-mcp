@@ -52,10 +52,10 @@ const getServer = () => {
   "add_torrent",
   {
     description:
-      "Add torrent file(s) to qBittorrent\n\nArgs:\n  query: Query string containing torrent file path(s), supports the following formats:\n         1. JSON string: \"{\\\"file_paths\\\": [\\\"path/to/file1.torrent\\\", \\\"path/to/file2.torrent\\\"]}\"\n         2. JSON string: \"[\\\"path/to/file1.torrent\\\", \\\"path/to/file2.torrent\\\"]\"\n         3. Single file path: \"path/to/file.torrent\"\n\nReturns:\n  Status and message of the add operation result",
+      "Add torrent via magnet link to qBittorrent\n\nArgs:\n  query: Magnet link string (e.g., \"magnet:?xt=urn:btih:...\")\n\nReturns:\n  Status and message of the add operation result",
     inputSchema: {
       query: z.string().describe(
-        "Query string containing torrent file path(s), supports JSON array, JSON object with file_paths, or single file path"
+        "Magnet link string starting with 'magnet:'"
       ),
     },
   },

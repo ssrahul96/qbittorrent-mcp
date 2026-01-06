@@ -1,6 +1,4 @@
 import axios, { AxiosError } from "axios";
-import { promises as fs } from "fs";
-import { basename } from "path";
 import FormData from "form-data";
 import { URLSearchParams } from "url";
 
@@ -84,13 +82,14 @@ async function loginToQBittorrent(creds: ApiCredentials): Promise<Cookies | null
 }
 
 /**
- * Parse torrent file paths from query string
+ * Parse magnet links from query string
  */
-function parseTorrentPaths(query: string): string[] {
+function parseMagnetLinks(query: string): string[] {
   try {
     const data = JSON.parse(query);
     if (Array.isArray(data)) return data;
-    if (typeof data === "object" && data.file_paths) return data.file_paths;
+    if (typeof data === "object" && data.urls) return Array.isArray(data.urls) ? data.urls : [data.urls];
+    if (typeof data === "object" && data.magnet_links) return Array.isArray(data.magnet_links) ? data.magnet_links : [data.magnet_links];
     throw new Error("Invalid JSON format");
   } catch {
     return [query.trim()];
@@ -98,7 +97,7 @@ function parseTorrentPaths(query: string): string[] {
 }
 
 /**
- * Add torrent file(s) to qBittorrent
+ * Add torrent via magnet link(s) to qBittorrent
  */
 export async function addTorrentApi(
   query: string,
@@ -113,30 +112,37 @@ export async function addTorrentApi(
   }
 
   try {
-    const filePaths = parseTorrentPaths(query);
-    if (filePaths.length === 0) {
-      return "Error: No torrent file path provided";
+    const magnetLinks = parseMagnetLinks(query);
+    if (magnetLinks.length === 0) {
+      return "Error: No magnet link provided";
     }
 
     const results: string[] = [];
     const cookieHeader = cookiesToString(cookies);
 
-    for (const filePath of filePaths) {
-      try {
-        await fs.access(filePath);
-      } catch {
-        results.push(`File does not exist: ${filePath}`);
+    for (const magnetLink of magnetLinks) {
+      if (!magnetLink.trim()) {
+        results.push("Error: Empty magnet link provided");
+        continue;
+      }
+
+      if (!magnetLink.startsWith("magnet:")) {
+        results.push(`Error: Invalid magnet link format: ${magnetLink}`);
         continue;
       }
 
       try {
-        const fileContent = await fs.readFile(filePath);
-        const fileName = basename(filePath);
         const formData = new FormData();
-        formData.append("torrents", fileContent, {
-          filename: fileName,
-          contentType: "application/x-bittorrent",
-        });
+        formData.append("urls", magnetLink);
+        // formData.append("autoTMM", "false");
+        // formData.append("savepath", "");
+        // formData.append("rename", "");
+        // formData.append("category", "");
+        // formData.append("stopped", "false");
+        // formData.append("stopCondition", "None");
+        // formData.append("contentLayout", "Original");
+        // formData.append("dlLimit", "0");
+        // formData.append("upLimit", "0");
 
         const response = await axios.post(`${host}/api/v2/torrents/add`, formData, {
           headers: {
@@ -148,25 +154,18 @@ export async function addTorrentApi(
         });
 
         if (response.status === 200) {
-          results.push(`Successfully added torrent file: ${fileName}`);
-        } else if (response.status === 415) {
-          results.push(`Invalid torrent file: ${fileName}`);
+          results.push(`Successfully added magnet link: ${magnetLink.substring(0, 50)}...`);
         } else {
-          results.push(`Failed to add torrent file ${fileName}: status code ${response.status}`);
+          results.push(`Failed to add magnet link: status code ${response.status}`);
         }
       } catch (error) {
         const axiosError = error as AxiosError;
         if (axiosError.response) {
           const status = axiosError.response.status;
-          const fileName = basename(filePath);
-          if (status === 415) {
-            results.push(`Invalid torrent file: ${fileName}`);
-          } else {
-            results.push(`Failed to add torrent file ${fileName}: status code ${status}`);
-          }
+          results.push(`Failed to add magnet link: status code ${status}`);
         } else {
           const message = error instanceof Error ? error.message : String(error);
-          results.push(`Error reading file ${filePath}: ${message}`);
+          results.push(`Error adding magnet link: ${message}`);
         }
       }
     }
