@@ -7,7 +7,7 @@ interface Cookies {
   readonly [key: string]: string;
 }
 
-interface ApiCredentials {
+export interface ApiCredentials {
   readonly host: string;
   readonly username: string;
   readonly password: string;
@@ -18,11 +18,78 @@ interface ApiResponse<T = unknown> {
   readonly data: T;
 }
 
+// Global credentials - initialized at startup
+let globalCredentials: ApiCredentials | null = null;
+
+// Session cookie cache to avoid repeated logins
+let cachedCookies: Cookies | null = null;
+let cookieCacheTime: number = 0;
+const COOKIE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Initialize API credentials (must be called before using any API functions)
+ */
+export function initializeApiCredentials(creds: ApiCredentials): void {
+  globalCredentials = creds;
+  // Clear cookie cache when credentials change
+  cachedCookies = null;
+  cookieCacheTime = 0;
+}
+
+/**
+ * Get the global API credentials
+ */
+function getCredentials(): ApiCredentials {
+  if (!globalCredentials) {
+    throw new Error("API credentials not initialized. Call initializeApiCredentials() first.");
+  }
+  return globalCredentials;
+}
+
+/**
+ * Extract error message from error object
+ */
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // Constants
 const FORM_URLENCODED_HEADERS = {
   Accept: "*/*",
   "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
 } as const;
+
+/**
+ * Generate a random ID for JSON-RPC 2.0 responses
+ */
+function generateRandomId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
+/**
+ * Create a JSON-RPC 2.0 success response
+ */
+function jsonRpcSuccess(result: unknown): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    result,
+    id: generateRandomId()
+  });
+}
+
+/**
+ * Create a JSON-RPC 2.0 error response
+ */
+function jsonRpcError(code: number, message: string): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    error: {
+      code,
+      message
+    },
+    id: generateRandomId()
+  });
+}
 
 /**
  * Convert cookies object to Cookie header string
@@ -56,8 +123,16 @@ function extractCookies(setCookieHeaders: string | string[] | undefined): Cookie
 
 /**
  * Login to qBittorrent WebUI and get session cookie
+ * Uses caching to avoid repeated logins within TTL period
  */
-async function loginToQBittorrent(creds: ApiCredentials): Promise<Cookies | null> {
+async function loginToQBittorrent(): Promise<Cookies | null> {
+  // Return cached cookies if still valid
+  const now = Date.now();
+  if (cachedCookies && (now - cookieCacheTime) < COOKIE_CACHE_TTL) {
+    return cachedCookies;
+  }
+
+  const creds = getCredentials();
   try {
     const response = await axios.post(
       `${creds.host}/api/v2/auth/login`,
@@ -73,10 +148,18 @@ async function loginToQBittorrent(creds: ApiCredentials): Promise<Cookies | null
 
     if (response.status === 200) {
       const cookies = extractCookies(response.headers["set-cookie"]);
-      return Object.keys(cookies).length > 0 ? cookies : null;
+      if (Object.keys(cookies).length > 0) {
+        cachedCookies = cookies;
+        cookieCacheTime = now;
+        return cookies;
+      }
     }
+    cachedCookies = null;
+    cookieCacheTime = 0;
     return null;
   } catch {
+    cachedCookies = null;
+    cookieCacheTime = 0;
     return null;
   }
 }
@@ -100,21 +183,18 @@ function parseMagnetLinks(query: string): string[] {
  * Add torrent via magnet link(s) to qBittorrent
  */
 export async function addTorrentApi(
-  query: string,
-  host: string,
-  username: string,
-  password: string
+  query: string
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
-  const cookies = await loginToQBittorrent(creds);
+  const creds = getCredentials();
+  const cookies = await loginToQBittorrent();
   if (!cookies) {
-    return "Login failed, unable to get SID";
+    return jsonRpcError(-32000, "Login failed, unable to get SID");
   }
 
   try {
     const magnetLinks = parseMagnetLinks(query);
     if (magnetLinks.length === 0) {
-      return "Error: No magnet link provided";
+      return jsonRpcError(-32602, "Error: No magnet link provided");
     }
 
     const results: string[] = [];
@@ -144,7 +224,7 @@ export async function addTorrentApi(
         // formData.append("dlLimit", "0");
         // formData.append("upLimit", "0");
 
-        const response = await axios.post(`${host}/api/v2/torrents/add`, formData, {
+        const response = await axios.post(`${creds.host}/api/v2/torrents/add`, formData, {
           headers: {
             ...formData.getHeaders(),
             Accept: "*/*",
@@ -161,19 +241,16 @@ export async function addTorrentApi(
       } catch (error) {
         const axiosError = error as AxiosError;
         if (axiosError.response) {
-          const status = axiosError.response.status;
-          results.push(`Failed to add magnet link: status code ${status}`);
+          results.push(`Failed to add magnet link: status code ${axiosError.response.status}`);
         } else {
-          const message = error instanceof Error ? error.message : String(error);
-          results.push(`Error adding magnet link: ${message}`);
+          results.push(`Error adding magnet link: ${getErrorMessage(error)}`);
         }
       }
     }
 
-    return results.join("\n");
+    return jsonRpcSuccess(results.join("\n"));
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -181,11 +258,11 @@ export async function addTorrentApi(
  * Helper to make authenticated API POST request
  */
 async function makePostRequest(
-  creds: ApiCredentials,
   endpoint: string,
   params: URLSearchParams
 ): Promise<ApiResponse> {
-  const cookies = await loginToQBittorrent(creds);
+  const creds = getCredentials();
+  const cookies = await loginToQBittorrent();
   if (!cookies) {
     throw new Error("Login failed, unable to get SID");
   }
@@ -198,7 +275,6 @@ async function makePostRequest(
     },
     maxRedirects: 0,
   });
-
   return { status: response.status, data: response.data };
 }
 
@@ -206,11 +282,11 @@ async function makePostRequest(
  * Helper to make authenticated API GET request
  */
 async function makeGetRequest(
-  creds: ApiCredentials,
   endpoint: string,
   params?: URLSearchParams
 ): Promise<ApiResponse> {
-  const cookies = await loginToQBittorrent(creds);
+  const creds = getCredentials();
+  const cookies = await loginToQBittorrent();
   if (!cookies) {
     throw new Error("Login failed, unable to get SID");
   }
@@ -233,31 +309,25 @@ async function makeGetRequest(
  */
 export async function deleteTorrentApi(
   hashes: string,
-  deleteFiles = false,
-  host = "",
-  username = "",
-  password = ""
+  deleteFiles = false
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({
       hashes,
       deleteFiles: deleteFiles.toString().toLowerCase(),
     });
 
-    const { status, data } = await makePostRequest(creds, "/api/v2/torrents/delete", params);
+    const { status, data } = await makePostRequest("/api/v2/torrents/delete", params);
 
     if (status === 200) {
-      return hashes === "all"
+      const message = hashes === "all"
         ? "Successfully deleted all torrents"
         : `Successfully deleted specified torrent(s): ${hashes}`;
+      return jsonRpcSuccess(message);
     }
-    return `Failed to delete torrent, HTTP status code: ${status}, response body: ${JSON.stringify(data)}`;
+    return jsonRpcError(-32000, `Failed to delete torrent, HTTP status code: ${status}, response body: ${JSON.stringify(data)}`);
   } catch (error) {
-    if (error instanceof Error) {
-      return `Error: ${error.message}`;
-    }
-    return `Error: ${String(error)}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -265,25 +335,20 @@ export async function deleteTorrentApi(
  * Pause torrent(s)
  */
 export async function pauseTorrentApi(
-  hashes: string,
-  host = "",
-  username = "",
-  password = ""
+  hashes: string
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({ hashes });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/stop", params);
-
+    const { status } = await makePostRequest("/api/v2/torrents/stop", params);
     if (status === 200) {
-      return hashes === "all"
+      const message = hashes === "all"
         ? "Successfully paused all torrents"
         : `Successfully paused specified torrent(s): ${hashes}`;
+      return jsonRpcSuccess(message);
     }
-    return `Failed to pause torrent: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to pause torrent: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -291,25 +356,21 @@ export async function pauseTorrentApi(
  * Resume torrent(s)
  */
 export async function resumeTorrentApi(
-  hashes: string,
-  host = "",
-  username = "",
-  password = ""
+  hashes: string
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({ hashes });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/start", params);
+    const { status } = await makePostRequest("/api/v2/torrents/start", params);
 
     if (status === 200) {
-      return hashes === "all"
+      const message = hashes === "all"
         ? "Successfully resumed all torrents"
         : `Successfully resumed specified torrent(s): ${hashes}`;
+      return jsonRpcSuccess(message);
     }
-    return `Failed to resume torrent: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to resume torrent: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -317,20 +378,16 @@ export async function resumeTorrentApi(
  * Get torrent trackers
  */
 export async function getTorrentTrackersUrls(
-  hash: string,
-  host = "",
-  username = "",
-  password = ""
+  hash: string
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({ hash });
-    const { status, data } = await makeGetRequest(creds, "/api/v2/torrents/trackers", params);
+    const { status, data } = await makeGetRequest("/api/v2/torrents/trackers", params);
 
     if (status === 200) {
       const trackers = data as Array<{ url?: string }>;
       if (!trackers || trackers.length === 0) {
-        return "This torrent has no trackers";
+        return jsonRpcSuccess("This torrent has no trackers");
       }
 
       // Extract all URLs, excluding special trackers like DHT, PeX, LSD
@@ -339,15 +396,14 @@ export async function getTorrentTrackersUrls(
         .filter((url): url is string => typeof url === "string" && !url.startsWith("** ["));
 
       if (trackerUrls.length === 0) {
-        return "This torrent has no valid tracker URLs";
+        return jsonRpcSuccess("This torrent has no valid tracker URLs");
       }
 
-      return trackerUrls.join(",");
+      return jsonRpcSuccess(trackerUrls.join(","));
     }
-    return `Failed to get torrent trackers: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to get torrent trackers: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -355,23 +411,18 @@ export async function getTorrentTrackersUrls(
  * Set global download speed limit
  */
 export async function setGlobalDownloadLimitApi(
-  limit: number,
-  host = "",
-  username = "",
-  password = ""
+  limit: number
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({ limit: limit.toString() });
-    const { status } = await makePostRequest(creds, "/api/v2/transfer/setDownloadLimit", params);
+    const { status } = await makePostRequest("/api/v2/transfer/setDownloadLimit", params);
 
     if (status === 200) {
-      return `Successfully set speed limit: ${limit}`;
+      return jsonRpcSuccess(`Successfully set speed limit: ${limit}`);
     }
-    return `Failed to set speed limit: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to set speed limit: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -379,45 +430,34 @@ export async function setGlobalDownloadLimitApi(
  * Set global upload speed limit
  */
 export async function setGlobalUploadLimitApi(
-  limit: number,
-  host = "",
-  username = "",
-  password = ""
+  limit: number
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({ limit: limit.toString() });
-    const { status } = await makePostRequest(creds, "/api/v2/transfer/setUploadLimit", params);
+    const { status } = await makePostRequest("/api/v2/transfer/setUploadLimit", params);
 
     if (status === 200) {
-      return `Successfully set speed limit: ${limit}`;
+      return jsonRpcSuccess(`Successfully set speed limit: ${limit}`);
     }
-    return `Failed to set speed limit: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to set speed limit: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
 /**
  * Get qBittorrent version
  */
-export async function getApplicationVersionApi(
-  host = "",
-  username = "",
-  password = ""
-): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
+export async function getApplicationVersionApi(): Promise<string> {
   try {
-    const { status, data } = await makeGetRequest(creds, "/api/v2/app/version");
+    const { status, data } = await makeGetRequest("/api/v2/app/version");
 
     if (status === 200) {
-      return String(data).trim();
+      return jsonRpcSuccess(String(data).trim());
     }
-    return `Failed to get qBittorrent version: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to get qBittorrent version: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -427,27 +467,22 @@ export async function getApplicationVersionApi(
 export async function setFilePriorityApi(
   hash: string,
   id: string,
-  priority: number,
-  host = "",
-  username = "",
-  password = ""
+  priority: number
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({
       hash,
       id,
       priority: priority.toString(),
     });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/filePrio", params);
+    const { status } = await makePostRequest("/api/v2/torrents/filePrio", params);
 
     if (status === 200) {
-      return `Successfully set file priority: ${hash}:${id}:${priority}`;
+      return jsonRpcSuccess(`Successfully set file priority: ${hash}:${id}:${priority}`);
     }
-    return `Failed to set file priority: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to set file priority: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -456,26 +491,21 @@ export async function setFilePriorityApi(
  */
 export async function setTorrentDownloadLimitApi(
   hash: string,
-  limit: number,
-  host = "",
-  username = "",
-  password = ""
+  limit: number
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({
       hashes: hash,
       limit: limit.toString(),
     });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/setDownloadLimit", params);
+    const { status } = await makePostRequest("/api/v2/torrents/setDownloadLimit", params);
 
     if (status === 200) {
-      return `Successfully set torrent download speed limit: ${hash}:${limit}`;
+      return jsonRpcSuccess(`Successfully set torrent download speed limit: ${hash}:${limit}`);
     }
-    return `Failed to set torrent download speed limit: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to set torrent download speed limit: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -484,26 +514,21 @@ export async function setTorrentDownloadLimitApi(
  */
 export async function setTorrentUploadLimitApi(
   hash: string,
-  limit: number,
-  host = "",
-  username = "",
-  password = ""
+  limit: number
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     const params = new URLSearchParams({
       hashes: hash,
       limit: limit.toString(),
     });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/setUploadLimit", params);
+    const { status } = await makePostRequest("/api/v2/torrents/setUploadLimit", params);
 
     if (status === 200) {
-      return `Successfully set torrent upload speed limit: ${hash}:${limit}`;
+      return jsonRpcSuccess(`Successfully set torrent upload speed limit: ${hash}:${limit}`);
     }
-    return `Failed to set torrent upload speed limit: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to set torrent upload speed limit: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -512,25 +537,20 @@ export async function setTorrentUploadLimitApi(
  */
 export async function addTrackersToTorrentApi(
   hash: string,
-  trackers: readonly string[],
-  host = "",
-  username = "",
-  password = ""
+  trackers: readonly string[]
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     // Join trackers with %0A (URL-encoded newline) as required by qBittorrent API
     const trackerUrls = trackers.join("%0A");
     const params = new URLSearchParams({ hash, urls: trackerUrls });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/addTrackers", params);
+    const { status } = await makePostRequest("/api/v2/torrents/addTrackers", params);
 
     if (status === 200) {
-      return `Successfully added trackers: ${hash}:${trackers.join(",")}`;
+      return jsonRpcSuccess(`Successfully added trackers: ${hash}:${trackers.join(",")}`);
     }
-    return `Failed to add trackers: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to add trackers: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
@@ -539,47 +559,36 @@ export async function addTrackersToTorrentApi(
  */
 export async function addTorrentTagsApi(
   hash: string,
-  tags: readonly string[],
-  host = "",
-  username = "",
-  password = ""
+  tags: readonly string[]
 ): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
   try {
     // Join tags with comma as required by qBittorrent API
     const tagsStr = tags.join(",");
     const params = new URLSearchParams({ hashes: hash, tags: tagsStr });
-    const { status } = await makePostRequest(creds, "/api/v2/torrents/addTags", params);
+    const { status } = await makePostRequest("/api/v2/torrents/addTags", params);
 
     if (status === 200) {
-      return `Successfully added torrent tags: ${hash}:${tags.join(",")}`;
+      return jsonRpcSuccess(`Successfully added torrent tags: ${hash}:${tags.join(",")}`);
     }
-    return `Failed to add torrent tags: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to add torrent tags: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 
 /**
  * Get torrent list
  */
-export async function getTorrentListApi(
-  host = "",
-  username = "",
-  password = ""
-): Promise<string> {
-  const creds: ApiCredentials = { host, username, password };
+export async function getTorrentListApi(): Promise<string> {
   try {
-    const { status, data } = await makeGetRequest(creds, "/api/v2/torrents/info");
+    const { status, data } = await makeGetRequest("/api/v2/torrents/info");
 
     if (status === 200) {
-      return JSON.stringify(data, null, 2);
+      return jsonRpcSuccess(data);
     }
-    return `Failed to get torrent list: status code ${status}`;
+    return jsonRpcError(-32000, `Failed to get torrent list: status code ${status}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Error: ${message}`;
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
   }
 }
 

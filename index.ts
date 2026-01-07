@@ -18,15 +18,9 @@ import {
   addTrackersToTorrentApi,
   addTorrentTagsApi,
   getTorrentListApi,
+  initializeApiCredentials,
+  type ApiCredentials,
 } from "./api.ts";
-
-// Types
-interface ApiCredentials {
-  host: string;
-  username: string;
-  password: string;
-}
-
 
 // Constants
 const DEFAULT_CREDENTIALS: ApiCredentials = {
@@ -36,6 +30,20 @@ const DEFAULT_CREDENTIALS: ApiCredentials = {
 };
 
 const DEFAULT_PORT = 8000;
+
+/**
+ * Helper to create tool handler response
+ */
+function createToolResponse(result: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: result,
+      },
+    ],
+  };
+}
 
 const getServer = () => {
   // Create an MCP server with implementation details
@@ -60,20 +68,8 @@ const getServer = () => {
     },
   },
   async ({ query }) => {
-    const result = await addTorrentApi(
-      query,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await addTorrentApi(query);
+    return createToolResponse(result);
   }
 );
 
@@ -90,21 +86,8 @@ const getServer = () => {
     },
   },
   async ({ hashes, delete_files }) => {
-    const result = await deleteTorrentApi(
-      hashes,
-      delete_files,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await deleteTorrentApi(hashes, delete_files);
+    return createToolResponse(result);
   }
 );
 
@@ -120,20 +103,8 @@ const getServer = () => {
     },
   },
   async ({ hashes }) => {
-    const result = await pauseTorrentApi(
-      hashes,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await pauseTorrentApi(hashes);
+    return createToolResponse(result);
   }
 );
 
@@ -149,20 +120,8 @@ const getServer = () => {
     },
   },
   async ({ hashes }) => {
-    const result = await resumeTorrentApi(
-      hashes,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await resumeTorrentApi(hashes);
+    return createToolResponse(result);
   }
 );
 
@@ -176,20 +135,8 @@ const getServer = () => {
     },
   },
   async ({ hash }) => {
-    const result = await getTorrentTrackersUrls(
-      hash,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await getTorrentTrackersUrls(hash);
+    return createToolResponse(result);
   }
 );
 
@@ -203,20 +150,8 @@ const getServer = () => {
     },
   },
   async ({ limit }) => {
-    const result = await setGlobalDownloadLimitApi(
-      limit,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await setGlobalDownloadLimitApi(limit);
+    return createToolResponse(result);
   }
 );
 
@@ -230,20 +165,8 @@ const getServer = () => {
     },
   },
   async ({ limit }) => {
-    const result = await setGlobalUploadLimitApi(
-      limit,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await setGlobalUploadLimitApi(limit);
+    return createToolResponse(result);
   }
 );
 
@@ -254,19 +177,8 @@ const getServer = () => {
     inputSchema: {},
   },
   async () => {
-    const result = await getApplicationVersionApi(
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await getApplicationVersionApi();
+    return createToolResponse(result);
   }
 );
 
@@ -284,22 +196,8 @@ const getServer = () => {
     },
   },
   async ({ hash, id, priority }) => {
-    const result = await setFilePriorityApi(
-      hash,
-      id,
-      priority,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await setFilePriorityApi(hash, id, priority);
+    return createToolResponse(result);
   }
 );
 
@@ -314,21 +212,8 @@ const getServer = () => {
     },
   },
   async ({ hash, limit }) => {
-    const result = await setTorrentDownloadLimitApi(
-      hash,
-      limit,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await setTorrentDownloadLimitApi(hash, limit);
+    return createToolResponse(result);
   }
 );
 
@@ -343,21 +228,8 @@ const getServer = () => {
     },
   },
   async ({ hash, limit }) => {
-    const result = await setTorrentUploadLimitApi(
-      hash,
-      limit,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await setTorrentUploadLimitApi(hash, limit);
+    return createToolResponse(result);
   }
 );
 
@@ -377,21 +249,8 @@ const getServer = () => {
       .split("\n")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    const result = await addTrackersToTorrentApi(
-      hash,
-      trackerList,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await addTrackersToTorrentApi(hash, trackerList);
+    return createToolResponse(result);
   }
 );
 
@@ -410,21 +269,8 @@ const getServer = () => {
       .split(",")
       .map((tag) => tag.trim())
       .filter((tag) => tag.length > 0);
-    const result = await addTorrentTagsApi(
-      hash,
-      tagList,
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await addTorrentTagsApi(hash, tagList);
+    return createToolResponse(result);
   }
 );
 
@@ -435,24 +281,16 @@ const getServer = () => {
     inputSchema: {},
   },
   async () => {
-    const result = await getTorrentListApi(
-      DEFAULT_CREDENTIALS.host,
-      DEFAULT_CREDENTIALS.username,
-      DEFAULT_CREDENTIALS.password
-    );
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: result,
-        },
-      ],
-    };
+    const result = await getTorrentListApi();
+    return createToolResponse(result);
   }
 );
 
   return server;
 };
+
+// Initialize API credentials before creating the Express app
+initializeApiCredentials(DEFAULT_CREDENTIALS);
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 
