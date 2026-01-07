@@ -255,6 +255,102 @@ export async function addTorrentApi(
 }
 
 /**
+ * Extract filename from URL
+ */
+function extractFileNameFromUrl(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const fileName = pathname.split('/').pop() || 'torrent.torrent';
+    // If no extension, add .torrent
+    if (!fileName.includes('.')) {
+      return `${fileName}.torrent`;
+    }
+    return fileName;
+  } catch {
+    // If URL parsing fails, try to extract from string
+    const parts = url.split('/');
+    const lastPart = parts[parts.length - 1] || 'torrent.torrent';
+    if (lastPart.includes('?')) {
+      return lastPart.split('?')[0] || 'torrent.torrent';
+    }
+    return lastPart.includes('.') ? lastPart : `${lastPart}.torrent`;
+  }
+}
+
+/**
+ * Add torrent via file to qBittorrent
+ */
+export async function addTorrentFileApi(
+  fileUrl: string,
+  fileName?: string
+): Promise<string> {
+  const creds = getCredentials();
+  const cookies = await loginToQBittorrent();
+  if (!cookies) {
+    return jsonRpcError(-32000, "Login failed, unable to get SID");
+  }
+
+  try {
+    if (!fileUrl || !fileUrl.trim()) {
+      return jsonRpcError(-32602, "Error: No file URL provided");
+    }
+
+    // Determine filename: use provided name or extract from URL
+    const finalFileName = fileName && fileName.trim() 
+      ? fileName.trim() 
+      : extractFileNameFromUrl(fileUrl);
+
+    // Download the file from the URL
+    let fileContent: Buffer;
+    try {
+      const downloadResponse = await axios.get(fileUrl, {
+        responseType: 'arraybuffer',
+        maxRedirects: 5,
+      });
+      fileContent = Buffer.from(downloadResponse.data);
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      if (axiosError.response) {
+        return jsonRpcError(-32000, `Failed to download file from URL: HTTP status ${axiosError.response.status}`);
+      }
+      return jsonRpcError(-32603, `Error downloading file from URL: ${getErrorMessage(error)}`);
+    }
+
+    if (!fileContent || fileContent.length === 0) {
+      return jsonRpcError(-32602, "Error: Downloaded file is empty");
+    }
+
+    const cookieHeader = cookiesToString(cookies);
+    const formData = new FormData();
+    formData.append("torrents", fileContent, {
+      filename: finalFileName,
+      contentType: "application/x-bittorrent",
+    });
+
+    const response = await axios.post(`${creds.host}/api/v2/torrents/add`, formData, {
+      headers: {
+        ...formData.getHeaders(),
+        Accept: "*/*",
+        Cookie: cookieHeader,
+      },
+      maxRedirects: 0,
+    });
+
+    if (response.status === 200) {
+      return jsonRpcSuccess(`Successfully added torrent file: ${finalFileName} from ${fileUrl}`);
+    }
+    return jsonRpcError(-32000, `Failed to add torrent file: status code ${response.status}`);
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    if (axiosError.response) {
+      return jsonRpcError(-32000, `Failed to add torrent file: status code ${axiosError.response.status}`);
+    }
+    return jsonRpcError(-32603, `Error: ${getErrorMessage(error)}`);
+  }
+}
+
+/**
  * Helper to make authenticated API POST request
  */
 async function makePostRequest(

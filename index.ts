@@ -5,6 +5,7 @@ import type { Request, Response } from 'express';
 import * as z from 'zod';
 import {
   addTorrentApi,
+  addTorrentFileApi,
   deleteTorrentApi,
   pauseTorrentApi,
   resumeTorrentApi,
@@ -69,6 +70,26 @@ const getServer = () => {
     },
     async ({ query }) => {
       const result = await addTorrentApi(query);
+      return createToolResponse(result);
+    }
+  );
+
+  server.registerTool(
+    "add_torrent_file",
+    {
+      description:
+        "Add torrent via file to qBittorrent\n\nArgs:\n  fileUrl: Download URL of the torrent file\n  fileName: Optional name of the torrent file (e.g., \"example.torrent\"). If not provided, filename will be extracted from the URL\n\nReturns:\n  Status and message of the add operation result",
+      inputSchema: {
+        fileUrl: z.string().describe(
+          "Download URL of the torrent file"
+        ),
+        fileName: z.string().optional().describe(
+          "Optional name of the torrent file (e.g., \"example.torrent\"). If not provided, filename will be extracted from the URL"
+        ),
+      },
+    },
+    async ({ fileUrl, fileName }) => {
+      const result = await addTorrentFileApi(fileUrl, fileName);
       return createToolResponse(result);
     }
   );
