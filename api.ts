@@ -214,6 +214,8 @@ export async function addTorrentApi(
       try {
         const formData = new FormData();
         formData.append("urls", magnetLink);
+        formData.append("sequentialDownload", "true");
+        formData.append("firstLastPiecePrio", "true");
         // formData.append("autoTMM", "false");
         // formData.append("savepath", "");
         // formData.append("rename", "");
@@ -297,8 +299,8 @@ export async function addTorrentFileApi(
     }
 
     // Determine filename: use provided name or extract from URL
-    const finalFileName = fileName && fileName.trim() 
-      ? fileName.trim() 
+    const finalFileName = fileName && fileName.trim()
+      ? fileName.trim()
       : extractFileNameFromUrl(fileUrl);
 
     // Download the file from the URL
@@ -327,6 +329,8 @@ export async function addTorrentFileApi(
       filename: finalFileName,
       contentType: "application/x-bittorrent",
     });
+    formData.append("sequentialDownload", "true");
+    formData.append("firstLastPiecePrio", "true");
 
     const response = await axios.post(`${creds.host}/api/v2/torrents/add`, formData, {
       headers: {
